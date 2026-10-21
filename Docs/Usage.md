@@ -183,6 +183,17 @@ If you want to check in the `Package.resolved` file so that everyone is on the s
 
 Specified local packages get put into a `Packages` group in the root of the project by default. This can be changed with `options.localPackagesGroup`.
 
+With Xcode 15 or later, set [`options.createLocalPackageGroups`](ProjectSpec.md#options) to `false` to show local packages only under Package Dependencies, without an additional folder reference in the project navigator:
+
+```yaml
+options:
+  createLocalPackageGroups: false
+```
+
+Packages used as `package:` test targets in explicit schemes or target schemes (including aggregate target schemes) retain their folder references so Xcode can discover and run their tests. `options.localPackagesGroup` and the package's `group` only affect references that are created. `excludeFromProject: true` continues to exclude the package from the project.
+
+Keep this option enabled when using Xcode 14. When disabling it, generate the project in the same directory as the spec: local package dependency and scheme paths currently remain relative to the spec directory, so generating elsewhere (for example, with `--project out`) may prevent package resolution.
+
 ### SDK
 System frameworks and libs can be linked by using the `sdk` dependency type. You can either specify frameworks or libs by using a `.framework`, `.tbd` or `dylib` filename, respectively
 

@@ -165,6 +165,13 @@ public class PBXProjGenerator {
             targetAggregateObjects[target.name] = aggregateTarget
         }
 
+        let testTargets = project.schemes.flatMap { $0.test?.targets ?? [] }
+            + project.projectTargets.flatMap { $0.scheme?.testTargets ?? [] }
+        let packagesWithTestTargets = Set(testTargets.compactMap { testTarget -> String? in
+            guard case let .package(name) = testTarget.targetReference.location else { return nil }
+            return name
+        })
+
         for (name, package) in project.packages {
             switch package {
             case let .remote(url, versionRequirement, traits):
@@ -177,7 +184,8 @@ public class PBXProjGenerator {
 
                 if !excludeFromProject {
                     addObject(packageReference)
-                    if project.options.createLocalPackageGroups {
+                    // Xcode needs a folder reference to discover a local package's test targets.
+                    if project.options.createLocalPackageGroups || packagesWithTestTargets.contains(name) {
                         try sourceGenerator.createLocalPackage(path: Path(path), group: group.map { Path($0) })
                     }
                 }

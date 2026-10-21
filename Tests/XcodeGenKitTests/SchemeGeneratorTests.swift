@@ -41,6 +41,89 @@ private let uiTest = Target(
 
 class SchemeGeneratorTests: XCTestCase {
 
+    func testLocalPackageFolderReferencesForSchemeTests() {
+        describe {
+            let groupOptions: [(package: String?, global: String?, parent: String?)] = [
+                (nil, nil, "Packages"),
+                (nil, "", nil),
+                ("PackageTests", "OtherPackages", "PackageTests"),
+            ]
+
+            for schemeKind in ["project", "target", "aggregate target"] {
+                for groups in groupOptions {
+                    $0.it("retains package folder references for \(schemeKind) scheme tests in \(groups.parent ?? "the project root")") {
+                        let testTarget = Scheme.Test.TestTarget(targetReference: .package("TestedPackage/LocalPackageTests"))
+                        var target = Target(name: "App", type: .application, platform: .iOS)
+                        var project = Project(
+                            basePath: fixturePath,
+                            name: "test",
+                            packages: [
+                                "TestedPackage": .local(path: "LocalPackage", group: groups.package, excludeFromProject: false),
+                                "UnusedPackage": .local(path: "SPM/FooFeature", group: "UnusedPackages", excludeFromProject: false),
+                            ],
+                            options: .init(localPackagesGroup: groups.global, createLocalPackageGroups: false)
+                        )
+
+                        switch schemeKind {
+                        case "project":
+                            project.schemes = [Scheme(
+                                name: "AppTests",
+                                build: .init(targets: [.init(target: .local(target.name))]),
+                                test: .init(config: "Debug", targets: [testTarget])
+                            )]
+                        case "target":
+                            target.scheme = TargetScheme(testTargets: [testTarget])
+                        default:
+                            project.aggregateTargets = [AggregateTarget(
+                                name: "AllTests",
+                                targets: [target.name],
+                                scheme: TargetScheme(testTargets: [testTarget])
+                            )]
+                        }
+                        project.targets = [target]
+
+                        let xcodeProject = try project.generateXcodeProject()
+                        let pbxProj = xcodeProject.pbxproj
+                        try pbxProj.validate()
+                        let folders = pbxProj.fileReferences.filter { $0.lastKnownFileType == "folder" }
+                        try expect(folders.count) == 1
+                        let folder = try unwrap(folders.first)
+                        try expect(folder.path) == "LocalPackage"
+                        let parent = try groups.parent.map { name in
+                            try unwrap(pbxProj.groups.first { $0.name == name })
+                        } ?? pbxProj.getMainGroup()
+                        try expect(parent.children.contains(folder)) == true
+                        try expect(pbxProj.groups.contains { $0.name == "UnusedPackages" }) == false
+                        try expect(pbxProj.rootObject?.localPackages.map(\.relativePath).sorted()) == ["LocalPackage", "SPM/FooFeature"]
+
+                        let scheme = try unwrap(xcodeProject.sharedData?.schemes.first)
+                        let testable = try unwrap(scheme.testAction?.testables.first?.buildableReference)
+                        try expect(testable.blueprintIdentifier) == "LocalPackageTests"
+                        try expect(testable.referencedContainer) == "container:LocalPackage"
+                    }
+                }
+            }
+        }
+    }
+
+    func testExcludesLocalPackageUsedBySchemeTests() throws {
+        var target = framework
+        target.scheme = TargetScheme(testTargets: [
+            .init(targetReference: .package("TestedPackage/LocalPackageTests")),
+        ])
+        let project = Project(
+            basePath: fixturePath,
+            name: "test",
+            targets: [target],
+            packages: ["TestedPackage": .local(path: "LocalPackage", group: nil, excludeFromProject: true)],
+            options: .init(createLocalPackageGroups: false)
+        )
+
+        let pbxProj = try project.generatePbxProj()
+        try expect(pbxProj.fileReferences.contains { $0.lastKnownFileType == "folder" }) == false
+        try expect(pbxProj.rootObject?.localPackages.isEmpty) == true
+    }
+
     func testSchemes() throws {
         try skipIfNecessary()
         describe {
